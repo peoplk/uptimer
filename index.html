@@ -4,6 +4,27 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>UpTimer - 时间管理</title>
+
+  <!-- Firebase SDK (compat for simplicity in single-file app) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+
+  <!-- ===== FIREBASE CONFIG - Replace with your own ===== -->
+  <script>
+    // ⚠️ 请将下面的配置替换为你自己的 Firebase 配置
+    // 获取方式见下方注释或文档
+const firebaseConfig = {
+  apiKey: "AIzaSyAYwxWCp6B2HEWuz-vOWtFJR8-lrTWC7L8",
+  authDomain: "uptimer-e6666.firebaseapp.com",
+  projectId: "uptimer-e6666",
+  storageBucket: "uptimer-e6666.firebasestorage.app",
+  messagingSenderId: "354708096701",
+  appId: "1:354708096701:web:5407c51b16133e99b559d4"
+};
+    // ===== END FIREBASE CONFIG =====
+  </script>
+
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -595,6 +616,74 @@
       width: 16px;
       height: 16px;
       pointer-events: none;
+    }
+
+    /* ===== Cloud Sync Status ===== */
+    .cloud-sync-indicator {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.75rem;
+      color: var(--muted);
+      padding: 0.35rem 0.75rem;
+      border-radius: 8px;
+      background: rgba(107, 122, 148, 0.1);
+      border: 1px solid transparent;
+      transition: all 0.3s ease;
+      cursor: default;
+      user-select: none;
+    }
+    .cloud-sync-indicator.syncing {
+      color: var(--warning);
+      border-color: rgba(245, 158, 11, 0.3);
+      background: rgba(245, 158, 11, 0.08);
+    }
+    .cloud-sync-indicator.synced {
+      color: var(--accent);
+      border-color: rgba(0, 217, 160, 0.3);
+      background: rgba(0, 217, 160, 0.08);
+    }
+    .cloud-sync-indicator.error {
+      color: var(--danger);
+      border-color: rgba(244, 63, 94, 0.3);
+      background: rgba(244, 63, 94, 0.08);
+    }
+    .cloud-sync-indicator.offline {
+      color: var(--muted);
+      border-color: var(--card-border);
+    }
+    .cloud-sync-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+      flex-shrink: 0;
+    }
+    .cloud-sync-indicator.syncing .cloud-sync-dot {
+      animation: sync-pulse 1s ease-in-out infinite;
+    }
+    @keyframes sync-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.8); }
+    }
+
+    /* Cloud sync settings card */
+    .sync-status-text {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-top: 0.5rem;
+    }
+    .sync-user-id {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.7rem;
+      color: var(--muted);
+      opacity: 0.6;
+      word-break: break-all;
+      margin-top: 0.35rem;
+      padding: 0.4rem 0.6rem;
+      background: var(--bg);
+      border-radius: 6px;
+      border: 1px solid var(--card-border);
     }
 
     /* ===== White Noise UI Optimizations ===== */
@@ -1253,6 +1342,12 @@
         </div>
       </nav>
 
+      <!-- Cloud Sync Status -->
+      <div class="cloud-sync-indicator" id="cloud-sync-status" title="云端同步状态">
+        <span class="cloud-sync-dot"></span>
+        <span id="cloud-sync-text">未连接</span>
+      </div>
+
       <!-- Today's Earnings -->
       <div class="glass-card p-4 mt-6">
         <div class="text-sm text-[var(--muted)] mb-1">今日收入</div>
@@ -1725,6 +1820,28 @@
           </div>
         </div>
 
+        <!-- Cloud Sync Settings -->
+        <div class="glass-card p-6 mb-6" id="cloud-sync-settings-card">
+          <h3 class="text-lg font-semibold mb-4">☁️ 云端同步</h3>
+          <div class="space-y-4">
+            <div class="flex items-center justify-between">
+              <span>启用云端同步</span>
+              <div class="toggle" id="cloud-sync-toggle"></div>
+            </div>
+            <div id="cloud-sync-detail" style="display:none;">
+              <div class="sync-status-text" id="cloud-sync-detail-text">正在连接...</div>
+              <div class="sync-user-id" id="cloud-sync-user-id" style="display:none;"></div>
+              <div class="flex gap-2 mt-3">
+                <button class="btn-secondary text-sm flex-1" id="cloud-sync-now-btn">立即同步</button>
+                <button class="btn-danger text-sm flex-1" id="cloud-sync-logout-btn">退出同步</button>
+              </div>
+            </div>
+            <div id="cloud-sync-off-text" class="sync-status-text">
+              开启后，数据将自动同步到云端，支持多设备实时同步。离线时数据保存在本地，联网后自动上传。
+            </div>
+          </div>
+        </div>
+
         <!-- Data Management -->
         <div class="glass-card p-6">
           <h3 class="text-lg font-semibold mb-4">数据管理</h3>
@@ -2129,6 +2246,397 @@
       }
     };
 
+    // =====================
+    // Firebase Cloud Sync
+    // =====================
+    let firebaseApp = null;
+    let firebaseAuth = null;
+    let firebaseDB = null;
+    let firebaseUser = null;
+    let firebaseUnsubscribe = null; // real-time listener
+    let cloudSyncEnabled = false;
+    let isSavingToCloud = false;     // prevent infinite loop
+    let pendingCloudSave = null;     // debounce cloud saves
+    let isInitialCloudLoad = true;   // skip re-render on first cloud load
+
+    function isFirebaseConfigured() {
+      return firebaseConfig.apiKey && firebaseConfig.apiKey !== 'YOUR_API_KEY';
+    }
+
+    async function initFirebase() {
+      if (!isFirebaseConfigured()) {
+        console.log('Firebase not configured, using local storage only');
+        updateSyncStatus('off', '未配置');
+        return false;
+      }
+      try {
+        firebaseApp = firebase.initializeApp(firebaseConfig);
+        firebaseAuth = firebase.auth();
+        firebaseDB = firebase.firestore();
+
+        // Enable offline persistence
+        firebaseDB.enablePersistence({ synchronizeTabs: true }).catch(err => {
+          if (err.code === 'failed-precondition') {
+            console.warn('Firestore persistence failed: multiple tabs open');
+          } else if (err.code === 'unimplemented') {
+            console.warn('Firestore persistence not supported in this browser');
+          }
+        });
+
+        // Restore saved UID
+        const savedUID = localStorage.getItem('uptimer-firebase-uid');
+        const savedSyncEnabled = localStorage.getItem('uptimer-cloud-sync') === 'true';
+
+        if (savedSyncEnabled && savedUID) {
+          // Try to sign in with saved anonymous user
+          try {
+            // Check if we have a saved credential
+            const savedUser = JSON.parse(localStorage.getItem('uptimer-firebase-user') || 'null');
+            if (savedUser && savedUser.isAnonymous) {
+              // Sign in anonymously - will get same user if credential exists
+              await firebaseAuth.signInAnonymously();
+            }
+          } catch (e) {
+            console.log('Auto sign-in failed, will re-authenticate');
+          }
+        }
+
+        // Listen for auth state
+        firebaseAuth.onAuthStateChanged(async (user) => {
+          if (user) {
+            firebaseUser = user;
+            localStorage.setItem('uptimer-firebase-uid', user.uid);
+            localStorage.setItem('uptimer-firebase-user', JSON.stringify({
+              uid: user.uid,
+              isAnonymous: user.isAnonymous
+            }));
+            await startCloudSync();
+          } else {
+            firebaseUser = null;
+            stopCloudSync();
+          }
+        });
+
+        return true;
+      } catch (e) {
+        console.error('Firebase init failed:', e);
+        updateSyncStatus('error', '初始化失败');
+        return false;
+      }
+    }
+
+    async function enableCloudSync() {
+      if (!isFirebaseConfigured()) {
+        showToast('请先配置 Firebase（替换代码中的 firebaseConfig）', 'error');
+        return;
+      }
+      localStorage.setItem('uptimer-cloud-sync', 'true');
+      cloudSyncEnabled = true;
+      updateSyncSettingsUI();
+
+      if (!firebaseUser) {
+        updateSyncStatus('syncing', '登录中...');
+        try {
+          await firebaseAuth.signInAnonymously();
+        } catch (e) {
+          console.error('Anonymous sign-in failed:', e);
+          updateSyncStatus('error', '登录失败');
+          cloudSyncEnabled = false;
+          localStorage.setItem('uptimer-cloud-sync', 'false');
+          showToast('云端登录失败，请检查网络', 'error');
+        }
+      } else {
+        await startCloudSync();
+      }
+    }
+
+    function disableCloudSync() {
+      localStorage.setItem('uptimer-cloud-sync', 'false');
+      cloudSyncEnabled = false;
+      stopCloudSync();
+      updateSyncSettingsUI();
+      updateSyncStatus('off', '本地模式');
+      showToast('已切换为本地存储模式', 'info');
+    }
+
+    async function startCloudSync() {
+      if (!firebaseUser || !firebaseDB) return;
+
+      updateSyncStatus('syncing', '同步中...');
+      cloudSyncEnabled = true;
+      updateSyncSettingsUI();
+
+      const userDoc = firebaseDB.collection('users').doc(firebaseUser.uid);
+
+      // First: upload current local data to cloud (merge)
+      try {
+        isSavingToCloud = true;
+        const cloudData = {
+          projects: appData.projects,
+          records: appData.records,
+          todos: appData.todos,
+          goals: appData.goals,
+          settings: appData.settings,
+          stats: appData.stats,
+          noiseSettings: getNoiseSettingsForSync(),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        await userDoc.set(cloudData, { merge: true });
+        isSavingToCloud = false;
+      } catch (e) {
+        console.error('Initial cloud upload failed:', e);
+        isSavingToCloud = false;
+        // Still continue to listen - offline persistence will handle it
+      }
+
+      // Then: listen for real-time changes
+      stopCloudSync(); // remove old listener if any
+      firebaseUnsubscribe = userDoc.onSnapshot((doc) => {
+        if (!doc.exists) return;
+        const data = doc.data();
+        if (!data) return;
+
+        if (isSavingToCloud) return; // skip our own writes
+
+        // Merge cloud data into appData
+        if (data.projects) appData.projects = data.projects;
+        if (data.records) appData.records = data.records;
+        if (data.todos) appData.todos = data.todos;
+        if (data.goals) appData.goals = data.goals;
+        if (data.stats) appData.stats = { ...appData.stats, ...data.stats };
+        if (data.settings) appData.settings = { ...appData.settings, ...data.settings };
+
+        // Also save to localStorage as cache
+        localStorage.setItem('uptimer-data', JSON.stringify(appData));
+
+        // Restore noise settings if available
+        if (data.noiseSettings) {
+          try {
+            localStorage.setItem('uptimer-noise-settings', JSON.stringify(data.noiseSettings));
+          } catch (e) {}
+        }
+
+        // Re-render UI to reflect synced data
+        if (!isInitialCloudLoad) {
+          refreshAllUI();
+          showToast('数据已从云端同步', 'info');
+        }
+        isInitialCloudLoad = false;
+
+        updateSyncStatus('synced', '已同步');
+        updateSyncSettingsUI();
+      }, (error) => {
+        console.error('Cloud sync listener error:', error);
+        if (error.code === 'permission-denied') {
+          updateSyncStatus('error', '权限不足');
+        } else {
+          updateSyncStatus('offline', '离线模式');
+        }
+      });
+
+      updateSyncStatus('synced', '已同步');
+    }
+
+    function stopCloudSync() {
+      if (firebaseUnsubscribe) {
+        firebaseUnsubscribe();
+        firebaseUnsubscribe = null;
+      }
+    }
+
+    async function saveToCloud() {
+      if (!cloudSyncEnabled || !firebaseUser || !firebaseDB || isSavingToCloud) return;
+
+      // Debounce: cancel previous pending save
+      if (pendingCloudSave) {
+        clearTimeout(pendingCloudSave);
+        pendingCloudSave = null;
+      }
+
+      // Debounce 500ms to batch rapid changes
+      pendingCloudSave = setTimeout(async () => {
+        try {
+          isSavingToCloud = true;
+          updateSyncStatus('syncing', '同步中...');
+          const userDoc = firebaseDB.collection('users').doc(firebaseUser.uid);
+          await userDoc.set({
+            projects: appData.projects,
+            records: appData.records,
+            todos: appData.todos,
+            goals: appData.goals,
+            settings: appData.settings,
+            stats: appData.stats,
+            noiseSettings: getNoiseSettingsForSync(),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+          isSavingToCloud = false;
+          updateSyncStatus('synced', '已同步');
+        } catch (e) {
+          console.error('Save to cloud failed:', e);
+          isSavingToCloud = false;
+          updateSyncStatus('offline', '保存失败（离线）');
+        }
+      }, 500);
+    }
+
+    function getNoiseSettingsForSync() {
+      try {
+        const saved = localStorage.getItem('uptimer-noise-settings');
+        return saved ? JSON.parse(saved) : null;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    async function forceSyncNow() {
+      if (!cloudSyncEnabled || !firebaseUser || !firebaseDB) {
+        showToast('云端同步未开启', 'info');
+        return;
+      }
+      showToast('正在同步...', 'info');
+      try {
+        isSavingToCloud = true;
+        updateSyncStatus('syncing', '同步中...');
+        const userDoc = firebaseDB.collection('users').doc(firebaseUser.uid);
+        // Upload local
+        await userDoc.set({
+          projects: appData.projects,
+          records: appData.records,
+          todos: appData.todos,
+          goals: appData.goals,
+          settings: appData.settings,
+          stats: appData.stats,
+          noiseSettings: getNoiseSettingsForSync(),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        isSavingToCloud = false;
+
+        // Then download fresh
+        const doc = await userDoc.get();
+        if (doc.exists) {
+          const data = doc.data();
+          if (data.projects) appData.projects = data.projects;
+          if (data.records) appData.records = data.records;
+          if (data.todos) appData.todos = data.todos;
+          if (data.goals) appData.goals = data.goals;
+          if (data.stats) appData.stats = { ...appData.stats, ...data.stats };
+          if (data.settings) appData.settings = { ...appData.settings, ...data.settings };
+          localStorage.setItem('uptimer-data', JSON.stringify(appData));
+          if (data.noiseSettings) {
+            localStorage.setItem('uptimer-noise-settings', JSON.stringify(data.noiseSettings));
+          }
+          refreshAllUI();
+        }
+
+        updateSyncStatus('synced', '已同步');
+        showToast('✅ 同步完成！', 'success');
+      } catch (e) {
+        isSavingToCloud = false;
+        console.error('Force sync failed:', e);
+        updateSyncStatus('error', '同步失败');
+        showToast('同步失败，请检查网络', 'error');
+      }
+    }
+
+    async function logoutCloudSync() {
+      const confirmed = await customConfirm('退出同步后，本地数据不会被删除，但不再与云端同步。确定退出？', '退出云端同步');
+      if (!confirmed) return;
+
+      stopCloudSync();
+      try {
+        if (firebaseUser) await firebaseUser.delete();
+      } catch (e) {
+        // If anonymous user can't be deleted (already linked), just sign out
+        try { await firebaseAuth.signOut(); } catch (e2) {}
+      }
+      firebaseUser = null;
+      localStorage.removeItem('uptimer-firebase-uid');
+      localStorage.removeItem('uptimer-firebase-user');
+      localStorage.setItem('uptimer-cloud-sync', 'false');
+      cloudSyncEnabled = false;
+      updateSyncStatus('off', '本地模式');
+      updateSyncSettingsUI();
+      showToast('已退出云端同步', 'info');
+    }
+
+    function updateSyncStatus(status, text) {
+      const el = document.getElementById('cloud-sync-status');
+      const textEl = document.getElementById('cloud-sync-text');
+      if (!el || !textEl) return;
+      el.className = 'cloud-sync-indicator ' + status;
+      textEl.textContent = text;
+    }
+
+    function updateSyncSettingsUI() {
+      const toggle = document.getElementById('cloud-sync-toggle');
+      const detailEl = document.getElementById('cloud-sync-detail');
+      const offTextEl = document.getElementById('cloud-sync-off-text');
+      const detailTextEl = document.getElementById('cloud-sync-detail-text');
+      const userIdEl = document.getElementById('cloud-sync-user-id');
+
+      if (!toggle) return;
+
+      if (cloudSyncEnabled) {
+        toggle.classList.add('active');
+        if (detailEl) detailEl.style.display = 'block';
+        if (offTextEl) offTextEl.style.display = 'none';
+        if (detailTextEl) {
+          if (firebaseUser) {
+            detailTextEl.textContent = '✅ 已连接云端，数据实时同步中';
+            detailTextEl.style.color = 'var(--accent)';
+          } else {
+            detailTextEl.textContent = '⏳ 正在连接...';
+            detailTextEl.style.color = 'var(--warning)';
+          }
+        }
+        if (userIdEl && firebaseUser) {
+          userIdEl.style.display = 'block';
+          userIdEl.textContent = '设备 ID: ' + firebaseUser.uid.substring(0, 20) + '...';
+        }
+      } else {
+        toggle.classList.remove('active');
+        if (detailEl) detailEl.style.display = 'none';
+        if (offTextEl) offTextEl.style.display = 'block';
+        if (userIdEl) userIdEl.style.display = 'none';
+      }
+    }
+
+    // Refresh all UI after cloud sync
+    function refreshAllUI() {
+      try {
+        updateStats();
+        renderTodayRecords();
+        renderProjects();
+        renderTodos();
+        renderGoalsOverview();
+        populateProjectSelects();
+        initSettings();
+        updateTimeDistribution();
+        renderStatsPage();
+      } catch (e) {
+        console.error('UI refresh failed:', e);
+      }
+    }
+
+    // Network status monitoring
+    function setupNetworkMonitoring() {
+      window.addEventListener('online', () => {
+        if (cloudSyncEnabled) {
+          updateSyncStatus('syncing', '重新连接...');
+          showToast('网络已恢复，正在同步...', 'info');
+        }
+      });
+      window.addEventListener('offline', () => {
+        if (cloudSyncEnabled) {
+          updateSyncStatus('offline', '离线模式');
+          showToast('网络断开，数据保存在本地', 'info');
+        }
+      });
+    }
+
+    // =====================
+    // Data Load / Save
+    // =====================
     // Load data from localStorage
     function loadData() {
       const saved = localStorage.getItem('uptimer-data');
@@ -2150,9 +2658,10 @@
       }
     }
 
-    // Save data to localStorage
+    // Save data to localStorage + cloud
     function saveData() {
       localStorage.setItem('uptimer-data', JSON.stringify(appData));
+      saveToCloud(); // async, non-blocking
     }
 
     // =====================
@@ -3113,6 +3622,7 @@
         volumes: noiseVolumes,
         renames
       }));
+      saveToCloud(); // sync noise settings to cloud too
     }
 
     // =====================
@@ -5629,6 +6139,11 @@
         initWhiteNoise();
         initEditRecordProjectCascade();
         startReminderSystem();
+
+        // Initialize Firebase cloud sync
+        initFirebase();
+        setupNetworkMonitoring();
+        updateSyncSettingsUI();
         
         // Sync UI on load
         updateTimerUI();
@@ -5654,6 +6169,26 @@
 
         // Auto request notification permission
         requestNotificationPermission();
+
+        // Cloud sync event listeners
+        const cloudSyncToggle = document.getElementById('cloud-sync-toggle');
+        if (cloudSyncToggle) {
+          cloudSyncToggle.addEventListener('click', () => {
+            if (cloudSyncEnabled) {
+              disableCloudSync();
+            } else {
+              enableCloudSync();
+            }
+          });
+        }
+        const cloudSyncNowBtn = document.getElementById('cloud-sync-now-btn');
+        if (cloudSyncNowBtn) {
+          cloudSyncNowBtn.addEventListener('click', forceSyncNow);
+        }
+        const cloudSyncLogoutBtn = document.getElementById('cloud-sync-logout-btn');
+        if (cloudSyncLogoutBtn) {
+          cloudSyncLogoutBtn.addEventListener('click', logoutCloudSync);
+        }
       } catch (error) {
         console.error('Error initializing app:', error);
       }
@@ -5806,9 +6341,18 @@
     }
 
     function clearData() {
+      // Also clear cloud data if sync is enabled
+      if (cloudSyncEnabled && firebaseUser && firebaseDB) {
+        firebaseDB.collection('users').doc(firebaseUser.uid).delete().catch(e => {
+          console.error('Failed to clear cloud data:', e);
+        });
+      }
       localStorage.removeItem('uptimer-data');
       localStorage.removeItem('navigation-order');
       localStorage.removeItem('uptimer-noise-settings');
+      localStorage.removeItem('uptimer-firebase-uid');
+      localStorage.removeItem('uptimer-firebase-user');
+      localStorage.removeItem('uptimer-cloud-sync');
       location.reload();
     }
 
